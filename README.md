@@ -5,6 +5,10 @@
 
 A complete Android library that provides a JNI wrapper for [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel), enabling SOCKS5 proxy tunneling through Android VPN service.
 
+## Build Status
+
+✅ Successfully builds for arm64-v8a and armeabi-v7a
+
 ## Features
 
 - ✅ Complete JNI wrapper for hev-socks5-tunnel
@@ -13,15 +17,39 @@ A complete Android library that provides a JNI wrapper for [hev-socks5-tunnel](h
 - ✅ Support for both config file and programmatic configuration
 - ✅ Real-time tunnel statistics
 - ✅ VPN service integration
-- ✅ Support for all major ABIs (armeabi-v7a, arm64-v8a, x86, x86_64)
-- ✅ Automatic download and build of native dependencies
+- ✅ Support for ARM architectures (armeabi-v7a, arm64-v8a)
+- ✅ Prebuilt native libraries for quick integration
+
+## Quick Start
+
+### Add to Your Project
+
+```gradle
+dependencies {
+    implementation files('libs/library-debug.aar')
+}
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/zak20090/hev-socks5-tunnel-android.git
+cd hev-socks5-tunnel-android
+./gradlew :library:assembleDebug
+```
+
+See [BUILD.md](BUILD.md) for detailed build instructions.
+
+## Supported Architectures
+
+- ✅ arm64-v8a (64-bit ARM)
+- ✅ armeabi-v7a (32-bit ARM)
 
 ## Requirements
 
-- Android SDK 21 (Android 5.0) or higher
-- NDK 25.1.8937393 or higher
-- CMake 3.22.1 or higher
-- Gradle 8.0 or higher
+- Android API 21+
+- Android NDK 25.1.8937393
+- CMake 3.22.1+
 
 ## Installation
 
@@ -327,8 +355,6 @@ Output: `library/build/outputs/aar/library-release.aar`
 
 - armeabi-v7a (ARM 32-bit)
 - arm64-v8a (ARM 64-bit)
-- x86 (Intel 32-bit)
-- x86_64 (Intel 64-bit)
 
 ## ProGuard
 
