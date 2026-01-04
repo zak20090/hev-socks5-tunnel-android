@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HevSocks5Tunnel Demo</string>
+    <string name="start_vpn">Start VPN</string>
+    <string name="stop_vpn">Stop VPN</string>
+    <string name="vpn_status">VPN Status: %s</string>
+    <string name="tunnel_stats">Tunnel Statistics</string>
+    <string name="status_stopped">Stopped</string>
+    <string name="status_running">Running</string>
+    <string name="notification_channel_name">VPN Service</string>
+    <string name="notification_channel_desc">Shows VPN service status</string>
+    <string name="notification_title">VPN Service</string>
+    <string name="notification_text">VPN tunnel is active</string>
+</resources>
