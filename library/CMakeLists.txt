@@ -6,7 +6,6 @@ include(ExternalProject)
 
 # Prepare compiler flags for Android
 string(REPLACE ";" " " CMAKE_C_FLAGS_STR "${CMAKE_C_FLAGS}")
-string(REPLACE ";" " " CMAKE_CXX_FLAGS_STR "${CMAKE_CXX_FLAGS}")
 
 # Build hev-socks5-tunnel using their Makefile
 ExternalProject_Add(
@@ -57,12 +56,6 @@ add_dependencies(hev-task-system hev-socks5-tunnel-external)
 # JNI wrapper library
 add_library(hev-socks5-tunnel-jni SHARED
     src/main/cpp/hev_socks5_tunnel_jni.cpp
-)
-
-target_include_directories(hev-socks5-tunnel-jni PRIVATE
-    ${SOURCE_DIR}/src
-    ${SOURCE_DIR}/src/core/include
-    ${SOURCE_DIR}/third-part/hev-task-system/include
 )
 
 target_link_libraries(hev-socks5-tunnel-jni
