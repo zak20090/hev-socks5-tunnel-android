@@ -62,20 +62,24 @@ target_include_directories(hev-socks5-tunnel-core PUBLIC
     ${HEV_SRC_DIR}
     ${HEV_SRC_DIR}/core/include
     ${HEV_THIRD_PART_DIR}/hev-task-system/include
+    ${HEV_THIRD_PART_DIR}/hev-task-system/src
     ${HEV_THIRD_PART_DIR}/lwip/repo/src/include
     ${HEV_THIRD_PART_DIR}/lwip
     ${HEV_THIRD_PART_DIR}/yaml/include
+    ${HEV_THIRD_PART_DIR}/yaml/src
 )
 
 # Add compile definitions
 target_compile_definitions(hev-socks5-tunnel-core PRIVATE
     _GNU_SOURCE
     ENABLE_PTHREAD
+    CONFIG_SCHED_CLOCK=CLOCK_MONOTONIC
 )
 
 # Add compile options
 target_compile_options(hev-socks5-tunnel-core PRIVATE
     -std=gnu11
+    -Wno-macro-redefined
 )
 
 # JNI wrapper library
