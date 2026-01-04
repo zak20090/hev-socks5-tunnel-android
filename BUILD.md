@@ -10,6 +10,8 @@ The build uses **prebuilt native libraries** for simplicity:
 - `libhev-socks5-tunnel-core.so` - Core SOCKS5 tunnel implementation
 - `libhev-socks5-tunnel-jni.so` - JNI wrapper (built from source)
 
+**Important Note**: The current prebuilt libraries in this repository are minimal placeholders for demonstration purposes. For production use, you must build the actual libraries from hev-socks5-tunnel source following the instructions below.
+
 ## Supported ABIs
 
 - ✅ arm64-v8a (64-bit ARM)
