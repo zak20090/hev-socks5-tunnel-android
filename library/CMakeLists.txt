@@ -1,13 +1,10 @@
 cmake_minimum_required(VERSION 3.22.1)
+
 project("hev-socks5-tunnel-android")
 
-# Set C/C++ standards
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 11)
-
+# Fetch hev-socks5-tunnel from GitHub
 include(FetchContent)
 
-# Fetch hev-socks5-tunnel from GitHub
 FetchContent_Declare(
     hev-socks5-tunnel
     GIT_REPOSITORY https://github.com/heiher/hev-socks5-tunnel.git
@@ -17,43 +14,83 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(hev-socks5-tunnel)
 
-# Set source directory for hev-socks5-tunnel
+# Set source directories
 set(HEV_SRC_DIR ${hev-socks5-tunnel_SOURCE_DIR}/src)
+set(HEV_THIRD_PART_DIR ${hev-socks5-tunnel_SOURCE_DIR}/third-part)
 
-# Collect all source files from hev-socks5-tunnel
-file(GLOB_RECURSE HEV_SOURCES
+# Collect all source files
+file(GLOB_RECURSE HEV_CORE_SOURCES
+    "${HEV_SRC_DIR}/core/src/*.c"
+)
+
+file(GLOB_RECURSE HEV_TASK_SOURCES
+    "${HEV_THIRD_PART_DIR}/hev-task-system/src/*.c"
+)
+
+file(GLOB_RECURSE HEV_LWIP_SOURCES
+    "${HEV_THIRD_PART_DIR}/lwip/repo/src/core/*.c"
+    "${HEV_THIRD_PART_DIR}/lwip/repo/src/core/*/*.c"
+    "${HEV_THIRD_PART_DIR}/lwip/repo/src/netif/*.c"
+    "${HEV_THIRD_PART_DIR}/lwip/repo/src/api/*.c"
+)
+
+file(GLOB HEV_YAML_SOURCES
+    "${HEV_THIRD_PART_DIR}/yaml/src/*.c"
+)
+
+file(GLOB HEV_MAIN_SOURCES
     "${HEV_SRC_DIR}/*.c"
 )
 
-# Remove main.c as we'll provide our own entry point
-list(FILTER HEV_SOURCES EXCLUDE REGEX ".*main\\.c$")
+# Exclude main.c as we're building a library
+list(FILTER HEV_MAIN_SOURCES EXCLUDE REGEX ".*/main\\.c$")
 
-# Create static library for hev-socks5-tunnel
-add_library(hev-socks5-tunnel-core STATIC ${HEV_SOURCES})
-
-target_include_directories(hev-socks5-tunnel-core PUBLIC
-    ${HEV_SRC_DIR}
-    ${hev-socks5-tunnel_SOURCE_DIR}/third-part/hev-task-system/include
-    ${hev-socks5-tunnel_SOURCE_DIR}/third-part/lwip/repo/src/include
-    ${hev-socks5-tunnel_SOURCE_DIR}/third-part/yaml
+# Combine all sources
+set(HEV_ALL_SOURCES
+    ${HEV_CORE_SOURCES}
+    ${HEV_TASK_SOURCES}
+    ${HEV_LWIP_SOURCES}
+    ${HEV_YAML_SOURCES}
+    ${HEV_MAIN_SOURCES}
 )
 
+# Build hev-socks5-tunnel as static library
+add_library(hev-socks5-tunnel-core STATIC ${HEV_ALL_SOURCES})
+
+# Set include directories - CRITICAL: Add lwip directory for lwipopts.h
+target_include_directories(hev-socks5-tunnel-core PUBLIC
+    ${HEV_SRC_DIR}
+    ${HEV_SRC_DIR}/core/include
+    ${HEV_THIRD_PART_DIR}/hev-task-system/include
+    ${HEV_THIRD_PART_DIR}/lwip/repo/src/include
+    ${HEV_THIRD_PART_DIR}/lwip
+    ${HEV_THIRD_PART_DIR}/yaml/include
+)
+
+# Add compile definitions
 target_compile_definitions(hev-socks5-tunnel-core PRIVATE
     _GNU_SOURCE
     ENABLE_PTHREAD
 )
 
-# Create the JNI shared library
+# Add compile options
+target_compile_options(hev-socks5-tunnel-core PRIVATE
+    -std=gnu11
+)
+
+# JNI wrapper library
 add_library(hev-socks5-tunnel-jni SHARED
     src/main/cpp/hev_socks5_tunnel_jni.cpp
+)
+
+target_include_directories(hev-socks5-tunnel-jni PRIVATE
+    ${HEV_SRC_DIR}
+    ${HEV_SRC_DIR}/core/include
+    ${HEV_THIRD_PART_DIR}/hev-task-system/include
 )
 
 target_link_libraries(hev-socks5-tunnel-jni
     hev-socks5-tunnel-core
     log
     android
-)
-
-target_include_directories(hev-socks5-tunnel-jni PRIVATE
-    ${HEV_SRC_DIR}
 )
