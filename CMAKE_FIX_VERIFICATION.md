@@ -1,64 +1,81 @@
-# CMake lwip Include Path Fix - Verification Guide
+# CMake ExternalProject Build - Verification Guide
 
 ## Issue Fixed
 
-The CMake build was failing with:
-```
-fatal error: 'lwip/tcp.h' file not found
-```
+The CMake build was failing because it attempted to manually compile hev-socks5-tunnel source files, which caused multiple issues:
+- **YAML library missing version macros**: `YAML_VERSION_STRING`, `YAML_VERSION_MAJOR`, etc.
+- **lwip headers not found**: `lwip/tcp.h`, `lwip/init.h`, `lwip/udp.h`
+- **Missing internal headers**: `hev-compiler.h` and other configuration files
 
-This was caused by incomplete include paths for lwip headers.
+## Root Cause
 
-## Changes Made
+The hev-socks5-tunnel project has its own sophisticated build system (Makefile) that:
+- Generates required configuration headers
+- Properly configures all submodules (yaml, lwip, hev-task-system)
+- Sets up correct include paths automatically
+- Builds everything in the correct order with proper dependencies
 
-### 1. Updated library/CMakeLists.txt
+**We cannot bypass their build system by manually compiling files.**
 
-#### Key Fixes:
+## Solution Implemented
 
-1. **Proper Source File Collection**: Split source collection into specific categories:
-   - `HEV_CORE_SOURCES` - Core functionality
-   - `HEV_TASK_SOURCES` - Task system
-   - `HEV_LWIP_SOURCES` - lwip networking stack
-   - `HEV_YAML_SOURCES` - YAML parser
-   - `HEV_MAIN_SOURCES` - Main entry points
+### Using CMake ExternalProject_Add
 
-2. **Critical Include Path Addition**: Added `${HEV_THIRD_PART_DIR}/lwip` directory
-   - This path contains the custom `lwipopts.h` configuration file
-   - Previously only had `lwip/repo/src/include` which wasn't sufficient
+The updated `library/CMakeLists.txt` now uses `ExternalProject_Add` to:
+1. Download hev-socks5-tunnel from GitHub
+2. Initialize all submodules recursively
+3. Build it using **their own Makefile** with `make static`
+4. Import the resulting static library
+5. Link our JNI wrapper with the built library
 
-3. **Complete Include Directories**:
+### Key Changes:
+
+1. **ExternalProject Configuration**:
    ```cmake
-   target_include_directories(hev-socks5-tunnel-core PUBLIC
-       ${HEV_SRC_DIR}
-       ${HEV_SRC_DIR}/core/include          # Added
-       ${HEV_THIRD_PART_DIR}/hev-task-system/include
-       ${HEV_THIRD_PART_DIR}/lwip/repo/src/include
-       ${HEV_THIRD_PART_DIR}/lwip           # CRITICAL: Added for lwipopts.h
-       ${HEV_THIRD_PART_DIR}/yaml/include   # Fixed path
+   ExternalProject_Add(
+       hev-socks5-tunnel-external
+       GIT_REPOSITORY https://github.com/heiher/hev-socks5-tunnel.git
+       GIT_TAG main
+       GIT_SUBMODULES_RECURSE ON
+       CONFIGURE_COMMAND ""
+       BUILD_COMMAND make static
+           CC=${CMAKE_C_COMPILER}
+           AR=${CMAKE_AR}
+           STRIP=${CMAKE_STRIP}
+           "CFLAGS=${CMAKE_C_FLAGS_STR} -fPIC"
+           CROSS_PREFIX=${ANDROID_TOOLCHAIN_PREFIX}
+       BUILD_IN_SOURCE 1
+       INSTALL_COMMAND ""
    )
    ```
 
-4. **Added Compile Options**:
-   - Added `-std=gnu11` for proper C11 support
-   - This ensures all C11 features used in the code are available
+2. **Proper Android Cross-Compilation**:
+   - Uses Android NDK compiler (`CMAKE_C_COMPILER`)
+   - Passes Android-specific flags via `CFLAGS`
+   - Uses Android archiver and strip tools
+   - Sets cross-compilation prefix for toolchain
 
-5. **Enhanced JNI Wrapper Includes**:
-   - Added `${HEV_SRC_DIR}/core/include` for JNI wrapper
-   - Added `${HEV_THIRD_PART_DIR}/hev-task-system/include` for JNI wrapper
+3. **Import Built Library**:
+   ```cmake
+   add_library(hev-socks5-tunnel-core STATIC IMPORTED)
+   set_target_properties(hev-socks5-tunnel-core PROPERTIES
+       IMPORTED_LOCATION ${BINARY_DIR}/bin/libhev-socks5-tunnel.a
+   )
+   ```
+
+4. **JNI Wrapper Links to Imported Library**:
+   - No manual source compilation
+   - Clean dependency chain
+   - Proper include paths from source directory
 
 ## Why This Fix Works
 
-lwip requires TWO include paths:
-1. **`lwip/repo/src/include`** - Contains the main lwip headers (lwip/tcp.h, lwip/ip.h, etc.)
-2. **`lwip/`** - Contains the project-specific `lwipopts.h` configuration file
-
-The lwip source files include headers like:
-```c
-#include "lwip/tcp.h"
-#include "lwipopts.h"
-```
-
-Without both paths, the compiler can't find all required headers.
+By using the upstream Makefile:
+- All configuration headers are generated automatically
+- Submodules (yaml, lwip, hev-task-system) build with their own Makefiles
+- Version macros and defines are set correctly
+- Include paths are managed by the upstream build system
+- Build order is correct (dependencies before main library)
 
 ## How to Verify the Fix
 
@@ -81,6 +98,8 @@ rm -rf library/.cxx
 
 The build should succeed with output similar to:
 ```
+> Task :library:externalNativeBuildDebug
+Building hev-socks5-tunnel with upstream Makefile...
 > Task :library:buildCMakeDebug[arm64-v8a]
 ...
 > Task :library:buildCMakeDebug[armeabi-v7a]
@@ -137,7 +156,8 @@ This should also succeed if the library builds correctly.
 
 ## Success Criteria
 
-✅ No CMake errors about missing headers (lwip/tcp.h, etc.)
+✅ No CMake errors about missing headers or macros
+✅ hev-socks5-tunnel builds successfully with its own Makefile
 ✅ All 4 ABIs build successfully
 ✅ libhev-socks5-tunnel-jni.so generated for all ABIs
 ✅ library-debug.aar and library-release.aar created
@@ -147,7 +167,7 @@ This should also succeed if the library builds correctly.
 ## Common Issues and Solutions
 
 ### Issue: "Could not resolve dependencies"
-**Solution**: Ensure you have internet connectivity for first build (downloads dependencies from GitHub)
+**Solution**: Ensure you have internet connectivity for first build (downloads hev-socks5-tunnel from GitHub)
 
 ### Issue: "NDK not found"
 **Solution**: Install NDK via Android Studio SDK Manager or set `ANDROID_NDK_HOME`
@@ -155,45 +175,70 @@ This should also succeed if the library builds correctly.
 ### Issue: "CMake version not found"
 **Solution**: Install CMake 3.22.1+ via Android Studio SDK Manager
 
-### Issue: Build still fails with lwip errors
+### Issue: Build fails with "make: command not found"
+**Solution**: ExternalProject requires `make` to be available. On Windows, use WSL or install make via MSYS2/Cygwin.
+
+### Issue: ExternalProject build fails
 **Solution**: 
 1. Clean build: `./gradlew clean`
 2. Delete `.cxx` folder: `rm -rf library/.cxx`
-3. Rebuild from scratch
+3. Check internet connection
+4. Rebuild from scratch
 
 ## Technical Details
 
-### Include Path Hierarchy
+### Build Process Flow
 
-The updated CMakeLists.txt ensures this include search order:
-1. Main source directory
-2. Core includes
-3. Third-party includes (task-system, lwip, yaml)
+1. **CMake Configuration Phase**:
+   - Sets up ExternalProject with git repository
+   - Configures compiler and toolchain variables
+   - Prepares build commands
 
-### Source File Organization
+2. **ExternalProject Download Phase**:
+   - Clones hev-socks5-tunnel from GitHub
+   - Initializes all submodules recursively
+   - Downloads yaml, lwip, hev-task-system
 
-Sources are now properly organized:
-- **Core**: Main socks5 tunnel implementation
-- **Task System**: Asynchronous task handling
-- **lwip**: Lightweight TCP/IP stack
-- **YAML**: Configuration parsing
+3. **ExternalProject Build Phase**:
+   - Runs `make static` in source directory
+   - Uses Android NDK compiler
+   - Builds all dependencies first (via their Makefiles)
+   - Produces `bin/libhev-socks5-tunnel.a`
 
-### Compilation Flags
+4. **JNI Wrapper Build Phase**:
+   - Compiles JNI C++ wrapper
+   - Links with imported static library
+   - Produces `libhev-socks5-tunnel-jni.so` for each ABI
 
-- `-std=gnu11`: GNU C11 standard (required for some language features)
-- `_GNU_SOURCE`: Enable GNU extensions
-- `ENABLE_PTHREAD`: Enable pthread support
+### Advantages of ExternalProject Approach
+
+1. **No Manual Dependency Management**: Upstream handles all submodules
+2. **Automatic Configuration**: All headers and macros generated correctly
+3. **Version Control**: Easy to update by changing `GIT_TAG`
+4. **Clean Separation**: JNI wrapper separate from core library
+5. **Upstream Compatibility**: Works with any version of hev-socks5-tunnel
+
+### Architecture Support
+
+The build supports all standard Android ABIs:
+- **armeabi-v7a**: 32-bit ARM (most phones)
+- **arm64-v8a**: 64-bit ARM (modern phones)
+- **x86**: 32-bit Intel (emulators)
+- **x86_64**: 64-bit Intel (emulators, rare devices)
+
+Each ABI builds independently with proper cross-compilation.
 
 ## Additional Notes
 
-- The fix is minimal and focused on include paths only
-- No changes to source code required
+- The fix uses CMake's built-in ExternalProject module
+- No changes to upstream hev-socks5-tunnel required
 - Compatible with all Android ABIs
 - Works with both debug and release builds
-- Follows CMake best practices
+- Follows CMake best practices for external dependencies
+- Build time may be longer on first build (downloads from GitHub)
 
 ## References
 
-- lwip documentation: https://www.nongnu.org/lwip/
-- CMake documentation: https://cmake.org/documentation/
+- CMake ExternalProject: https://cmake.org/cmake/help/latest/module/ExternalProject.html
+- hev-socks5-tunnel: https://github.com/heiher/hev-socks5-tunnel
 - Android NDK CMake guide: https://developer.android.com/ndk/guides/cmake
