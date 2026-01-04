@@ -28,12 +28,31 @@ ExternalProject_Add(
 ExternalProject_Get_Property(hev-socks5-tunnel-external SOURCE_DIR)
 ExternalProject_Get_Property(hev-socks5-tunnel-external BINARY_DIR)
 
-# Import the built static library
+# Import the built static libraries
 add_library(hev-socks5-tunnel-core STATIC IMPORTED)
 set_target_properties(hev-socks5-tunnel-core PROPERTIES
     IMPORTED_LOCATION ${BINARY_DIR}/bin/libhev-socks5-tunnel.a
 )
 add_dependencies(hev-socks5-tunnel-core hev-socks5-tunnel-external)
+
+# Import third-party static libraries built by the Makefile
+add_library(yaml STATIC IMPORTED)
+set_target_properties(yaml PROPERTIES
+    IMPORTED_LOCATION ${BINARY_DIR}/third-part/yaml/bin/libyaml.a
+)
+add_dependencies(yaml hev-socks5-tunnel-external)
+
+add_library(lwip STATIC IMPORTED)
+set_target_properties(lwip PROPERTIES
+    IMPORTED_LOCATION ${BINARY_DIR}/third-part/lwip/bin/liblwip.a
+)
+add_dependencies(lwip hev-socks5-tunnel-external)
+
+add_library(hev-task-system STATIC IMPORTED)
+set_target_properties(hev-task-system PROPERTIES
+    IMPORTED_LOCATION ${BINARY_DIR}/third-part/hev-task-system/bin/libhev-task-system.a
+)
+add_dependencies(hev-task-system hev-socks5-tunnel-external)
 
 # JNI wrapper library
 add_library(hev-socks5-tunnel-jni SHARED
@@ -48,6 +67,9 @@ target_include_directories(hev-socks5-tunnel-jni PRIVATE
 
 target_link_libraries(hev-socks5-tunnel-jni
     hev-socks5-tunnel-core
+    yaml
+    lwip
+    hev-task-system
     log
     android
 )
