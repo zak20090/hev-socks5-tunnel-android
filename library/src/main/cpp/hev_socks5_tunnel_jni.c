@@ -1,9 +1,11 @@
 #include <jni.h>
 #include <android/log.h>
-#include <string>
-#include <cstring>
+#include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <stdio.h>
 
 #define LOG_TAG "HevSocks5TunnelJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -11,74 +13,88 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-// External functions from hev-socks5-tunnel
-extern "C" {
-    int hev_socks5_tunnel_main(int argc, char *argv[]);
-    void hev_socks5_tunnel_quit(void);
-    void hev_socks5_tunnel_stats(size_t *tx_packets, size_t *tx_bytes,
-                                   size_t *rx_packets, size_t *rx_bytes);
-}
+/* External functions from hev-socks5-tunnel */
+extern int hev_socks5_tunnel_main(int argc, char *argv[]);
+extern void hev_socks5_tunnel_quit(void);
+extern void hev_socks5_tunnel_stats(size_t *tx_packets, size_t *tx_bytes,
+                               size_t *rx_packets, size_t *rx_bytes);
 
-// Global state
-static volatile bool tunnel_running = false;
+/* Global state */
+static volatile int tunnel_running = 0;
 static pthread_mutex_t tunnel_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Helper function to get FD from FileDescriptor
-extern "C" JNIEXPORT jint JNICALL
+/* Helper function to get FD from FileDescriptor */
+JNIEXPORT jint JNICALL
 Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_getFdFromFileDescriptor(
-    JNIEnv *env, jobject /* this */, jobject fileDescriptor) {
+    JNIEnv *env, jobject thiz, jobject fileDescriptor) {
     
-    if (fileDescriptor == nullptr) {
+    jclass fdClass;
+    jfieldID fdField;
+    jint fd;
+    
+    if (fileDescriptor == NULL) {
         LOGE("FileDescriptor is null");
         return -1;
     }
     
-    jclass fdClass = env->FindClass("java/io/FileDescriptor");
-    if (fdClass == nullptr) {
+    fdClass = (*env)->FindClass(env, "java/io/FileDescriptor");
+    if (fdClass == NULL) {
         LOGE("Failed to find FileDescriptor class");
         return -1;
     }
     
-    jfieldID fdField = env->GetFieldID(fdClass, "descriptor", "I");
-    if (fdField == nullptr) {
+    fdField = (*env)->GetFieldID(env, fdClass, "descriptor", "I");
+    if (fdField == NULL) {
         LOGE("Failed to find descriptor field");
-        env->DeleteLocalRef(fdClass);
+        (*env)->DeleteLocalRef(env, fdClass);
         return -1;
     }
     
-    jint fd = env->GetIntField(fileDescriptor, fdField);
-    env->DeleteLocalRef(fdClass);
+    fd = (*env)->GetIntField(env, fileDescriptor, fdField);
+    (*env)->DeleteLocalRef(env, fdClass);
     
     LOGD("Extracted FD: %d", fd);
     return fd;
 }
 
-// Write config to temporary file
-static std::string writeConfigToTempFile(const std::string &config) {
+/* Write config to temporary file */
+static char* writeConfigToTempFile(const char *config, size_t config_len) {
     char tmpFile[] = "/data/local/tmp/hev-socks5-tunnel-XXXXXX";
-    int fd = mkstemp(tmpFile);
+    char *result;
+    int fd;
+    ssize_t written;
+    
+    fd = mkstemp(tmpFile);
     if (fd < 0) {
         LOGE("Failed to create temp file: %s", strerror(errno));
-        return "";
+        return NULL;
     }
     
-    ssize_t written = write(fd, config.c_str(), config.length());
+    written = write(fd, config, config_len);
     close(fd);
     
-    if (written != (ssize_t)config.length()) {
+    if (written != (ssize_t)config_len) {
         LOGE("Failed to write config to temp file");
         unlink(tmpFile);
-        return "";
+        return NULL;
     }
     
     LOGI("Config written to: %s", tmpFile);
-    return std::string(tmpFile);
+    result = strdup(tmpFile);
+    return result;
 }
 
-// Start tunnel from config file
-extern "C" JNIEXPORT jint JNICALL
+/* Start tunnel from config file */
+JNIEXPORT jint JNICALL
 Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeStart(
-    JNIEnv *env, jobject /* this */, jstring configPath, jint tunFd) {
+    JNIEnv *env, jobject thiz, jstring configPath, jint tunFd) {
+    
+    const char *configPathStr;
+    char arg0[] = "hev-socks5-tunnel";
+    char arg1[] = "-c";
+    char *argv[4];
+    char tunFdEnv[32];
+    int result;
     
     pthread_mutex_lock(&tunnel_mutex);
     if (tunnel_running) {
@@ -86,50 +102,54 @@ Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeStart(
         pthread_mutex_unlock(&tunnel_mutex);
         return -1;
     }
-    tunnel_running = true;
+    tunnel_running = 1;
     pthread_mutex_unlock(&tunnel_mutex);
     
-    const char *configPathStr = env->GetStringUTFChars(configPath, nullptr);
-    if (configPathStr == nullptr) {
+    configPathStr = (*env)->GetStringUTFChars(env, configPath, NULL);
+    if (configPathStr == NULL) {
         LOGE("Failed to get config path string");
-        tunnel_running = false;
+        tunnel_running = 0;
         return -1;
     }
     
     LOGI("Starting tunnel with config: %s, TUN FD: %d", configPathStr, tunFd);
     
-    // Prepare arguments for hev-socks5-tunnel
-    char arg0[] = "hev-socks5-tunnel";
-    char arg1[] = "-c";
-    char *argv[] = {
-        arg0,
-        arg1,
-        const_cast<char*>(configPathStr),
-        nullptr
-    };
+    /* Prepare arguments for hev-socks5-tunnel */
+    argv[0] = arg0;
+    argv[1] = arg1;
+    argv[2] = (char*)configPathStr;
+    argv[3] = NULL;
     
-    // Set TUN FD environment variable
-    char tunFdEnv[32];
+    /* Set TUN FD environment variable */
     snprintf(tunFdEnv, sizeof(tunFdEnv), "%d", tunFd);
     setenv("HEV_SOCKS5_TUNNEL_TUN_FD", tunFdEnv, 1);
     
-    // Run the tunnel
-    int result = hev_socks5_tunnel_main(3, argv);
+    /* Run the tunnel */
+    result = hev_socks5_tunnel_main(3, argv);
     
-    env->ReleaseStringUTFChars(configPath, configPathStr);
+    (*env)->ReleaseStringUTFChars(env, configPath, configPathStr);
     
     pthread_mutex_lock(&tunnel_mutex);
-    tunnel_running = false;
+    tunnel_running = 0;
     pthread_mutex_unlock(&tunnel_mutex);
     
     LOGI("Tunnel exited with code: %d", result);
     return result;
 }
 
-// Start tunnel from config string
-extern "C" JNIEXPORT jint JNICALL
+/* Start tunnel from config string */
+JNIEXPORT jint JNICALL
 Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeStartFromString(
-    JNIEnv *env, jobject /* this */, jstring configYaml, jint tunFd) {
+    JNIEnv *env, jobject thiz, jstring configYaml, jint tunFd) {
+    
+    const char *configStr;
+    char *tempFile;
+    char arg0[] = "hev-socks5-tunnel";
+    char arg1[] = "-c";
+    char *argv[4];
+    char tunFdEnv[32];
+    jsize config_len;
+    int result;
     
     pthread_mutex_lock(&tunnel_mutex);
     if (tunnel_running) {
@@ -137,73 +157,73 @@ Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeStartFromString(
         pthread_mutex_unlock(&tunnel_mutex);
         return -1;
     }
-    tunnel_running = true;
+    tunnel_running = 1;
     pthread_mutex_unlock(&tunnel_mutex);
     
-    const char *configStr = env->GetStringUTFChars(configYaml, nullptr);
-    if (configStr == nullptr) {
+    configStr = (*env)->GetStringUTFChars(env, configYaml, NULL);
+    if (configStr == NULL) {
         LOGE("Failed to get config string");
-        tunnel_running = false;
+        tunnel_running = 0;
         return -1;
     }
     
     LOGI("Starting tunnel with inline config, TUN FD: %d", tunFd);
     LOGD("Config:\n%s", configStr);
     
-    // Write config to temporary file
-    std::string tempFile = writeConfigToTempFile(configStr);
-    env->ReleaseStringUTFChars(configYaml, configStr);
+    config_len = (*env)->GetStringUTFLength(env, configYaml);
     
-    if (tempFile.empty()) {
+    /* Write config to temporary file */
+    tempFile = writeConfigToTempFile(configStr, config_len);
+    (*env)->ReleaseStringUTFChars(env, configYaml, configStr);
+    
+    if (tempFile == NULL) {
         LOGE("Failed to create config file");
-        tunnel_running = false;
+        tunnel_running = 0;
         return -1;
     }
     
-    // Prepare arguments
-    char arg0[] = "hev-socks5-tunnel";
-    char arg1[] = "-c";
-    char *argv[] = {
-        arg0,
-        arg1,
-        const_cast<char*>(tempFile.c_str()),
-        nullptr
-    };
+    /* Prepare arguments */
+    argv[0] = arg0;
+    argv[1] = arg1;
+    argv[2] = tempFile;
+    argv[3] = NULL;
     
-    // Set TUN FD environment variable
-    char tunFdEnv[32];
+    /* Set TUN FD environment variable */
     snprintf(tunFdEnv, sizeof(tunFdEnv), "%d", tunFd);
     setenv("HEV_SOCKS5_TUNNEL_TUN_FD", tunFdEnv, 1);
     
-    // Run the tunnel
-    int result = hev_socks5_tunnel_main(3, argv);
+    /* Run the tunnel */
+    result = hev_socks5_tunnel_main(3, argv);
     
-    // Clean up temp file
-    unlink(tempFile.c_str());
+    /* Clean up temp file */
+    unlink(tempFile);
+    free(tempFile);
     
     pthread_mutex_lock(&tunnel_mutex);
-    tunnel_running = false;
+    tunnel_running = 0;
     pthread_mutex_unlock(&tunnel_mutex);
     
     LOGI("Tunnel exited with code: %d", result);
     return result;
 }
 
-// Stop the tunnel
-extern "C" JNIEXPORT void JNICALL
+/* Stop the tunnel */
+JNIEXPORT void JNICALL
 Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeStop(
-    JNIEnv * /* env */, jobject /* this */) {
+    JNIEnv *env, jobject thiz) {
     
     LOGI("Requesting tunnel stop");
     hev_socks5_tunnel_quit();
 }
 
-// Get tunnel statistics
-extern "C" JNIEXPORT jlongArray JNICALL
+/* Get tunnel statistics */
+JNIEXPORT jlongArray JNICALL
 Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeGetStats(
-    JNIEnv *env, jobject /* this */) {
+    JNIEnv *env, jobject thiz) {
     
     size_t tx_packets = 0, tx_bytes = 0, rx_packets = 0, rx_bytes = 0;
+    jlongArray result;
+    jlong stats[4];
     
     pthread_mutex_lock(&tunnel_mutex);
     if (tunnel_running) {
@@ -211,29 +231,28 @@ Java_cc_hev_socks5_tunnel_HevSocks5Tunnel_nativeGetStats(
     }
     pthread_mutex_unlock(&tunnel_mutex);
     
-    jlongArray result = env->NewLongArray(4);
-    if (result == nullptr) {
+    result = (*env)->NewLongArray(env, 4);
+    if (result == NULL) {
         LOGE("Failed to create stats array");
-        return nullptr;
+        return NULL;
     }
     
-    jlong stats[4] = {
-        static_cast<jlong>(tx_bytes),
-        static_cast<jlong>(rx_bytes),
-        static_cast<jlong>(tx_packets),
-        static_cast<jlong>(rx_packets)
-    };
+    stats[0] = (jlong)tx_bytes;
+    stats[1] = (jlong)rx_bytes;
+    stats[2] = (jlong)tx_packets;
+    stats[3] = (jlong)rx_packets;
     
-    env->SetLongArrayRegion(result, 0, 4, stats);
+    (*env)->SetLongArrayRegion(env, result, 0, 4, stats);
     return result;
 }
 
-// JNI_OnLoad
-JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* /* reserved */) {
+/* JNI_OnLoad */
+JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    JNIEnv* env;
+    
     LOGI("JNI_OnLoad called");
     
-    JNIEnv* env;
-    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+    if ((*vm)->GetEnv(vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK) {
         LOGE("Failed to get JNI environment");
         return JNI_ERR;
     }
