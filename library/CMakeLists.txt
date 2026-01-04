@@ -57,29 +57,44 @@ set(HEV_ALL_SOURCES
 # Build hev-socks5-tunnel as static library
 add_library(hev-socks5-tunnel-core STATIC ${HEV_ALL_SOURCES})
 
-# Set include directories - CRITICAL: Add lwip directory for lwipopts.h
+# Set include directories - COMPLETE with correct order
 target_include_directories(hev-socks5-tunnel-core PUBLIC
+    # Main source directories
     ${HEV_SRC_DIR}
     ${HEV_SRC_DIR}/core/include
+    
+    # hev-task-system (both public and internal headers)
     ${HEV_THIRD_PART_DIR}/hev-task-system/include
     ${HEV_THIRD_PART_DIR}/hev-task-system/src
+    
+    # lwip - CRITICAL ORDER: repo/src/include BEFORE base lwip dir
     ${HEV_THIRD_PART_DIR}/lwip/repo/src/include
     ${HEV_THIRD_PART_DIR}/lwip
+    
+    # yaml (both public and internal headers)
     ${HEV_THIRD_PART_DIR}/yaml/include
     ${HEV_THIRD_PART_DIR}/yaml/src
 )
 
-# Add compile definitions
+# Add ALL required compile definitions for hev-task-system and dependencies
 target_compile_definitions(hev-socks5-tunnel-core PRIVATE
+    # Base system definitions
     _GNU_SOURCE
     ENABLE_PTHREAD
+    
+    # Scheduler configuration
     CONFIG_SCHED_CLOCK=CLOCK_MONOTONIC
+    
+    # Memory allocator configuration (hev-task-system)
+    CONFIG_MEMALLOC_SLICE_ALIGN=8              # Memory alignment in bytes
+    CONFIG_MEMALLOC_SLICE_MAX_SIZE=32768       # Max slice size: 32KB
+    CONFIG_MEMALLOC_SLICE_MAX_COUNT=128        # Max cached slices
 )
 
-# Add compile options
+# Compile options
 target_compile_options(hev-socks5-tunnel-core PRIVATE
     -std=gnu11
-    -Wno-macro-redefined
+    -Wno-macro-redefined    # Suppress _GNU_SOURCE redefinition warning
 )
 
 # JNI wrapper library
